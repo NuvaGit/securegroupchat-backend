@@ -4,17 +4,22 @@ const cors = require("cors");
 const http = require("http");
 const { Server } = require("socket.io");
 const mongoose = require("mongoose");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
 
 // 🔹 Connect to MongoDB
 mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log("✅ Connected to MongoDB"))
     .catch(err => console.error("❌ MongoDB connection error:", err));
 
-
 // 🔹 Define Message Schema
 const MessageSchema = new mongoose.Schema({
     user: String,
     text: String,
+    recipient: String,
+    fileUrl: String,
+    fileType: String,
     timestamp: { type: Date, default: Date.now },
 });
 
@@ -30,6 +35,27 @@ let users = {}; // Store connected users
 
 app.use(cors());
 app.use(express.json());
+app.use("/uploads", express.static("uploads"));
+
+// 🔹 Multer setup for file uploads
+const storage = multer.diskStorage({
+    destination: "uploads/",
+    filename: (req, file, cb) => {
+        cb(null, `${Date.now()}-${file.originalname}`);
+    },
+});
+
+const upload = multer({ storage });
+
+// 🔹 File Upload Endpoint
+app.post("/upload", upload.single("file"), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+    res.json({
+        fileUrl: `/uploads/${req.file.filename}`,
+        fileType: req.file.mimetype,
+    });
+});
 
 // 🔹 API Route to Check Server Status
 app.get("/", (req, res) => {
@@ -55,10 +81,21 @@ io.on("connection", (socket) => {
         socket.emit("chat_history", chatHistory);
     });
 
-    // 🔸 Handle New Messages
+    // 🔸 Handle Typing Indicator
+    socket.on("typing", ({ isTyping }) => {
+        socket.broadcast.emit("user_typing", { user: users[socket.id], isTyping });
+    });
+
+    // 🔸 Handle New Messages & File Attachments
     socket.on("send_message", async (msg) => {
         const user = users[socket.id] || "Anonymous";
-        const messageData = { user, text: msg.text };
+        const messageData = {
+            user,
+            text: msg.text || "",
+            recipient: msg.recipient || "All",
+            fileUrl: msg.fileUrl || "",
+            fileType: msg.fileType || ""
+        };
 
         // Save message in MongoDB
         const savedMessage = new Message(messageData);
@@ -75,5 +112,6 @@ io.on("connection", (socket) => {
     });
 });
 
+// 🔹 Start Server
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
