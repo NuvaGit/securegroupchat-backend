@@ -126,13 +126,23 @@ io.on("connection", (socket) => {
       reactions: [],
       timestamp: new Date(),
     };
-
+  
     const savedMessage = new Message(messageData);
     await savedMessage.save();
-
-    // Emit the message to all clients in the room
-    io.to(messageData.room).emit("receive_message", savedMessage);
+  
+    if (messageData.recipient !== "All") {
+      const recipientSocketId = Object.keys(users).find(
+        (id) => users[id] === messageData.recipient
+      );
+      if (recipientSocketId) {
+        io.to(recipientSocketId).emit("receive_message", savedMessage);
+        socket.emit("receive_message", savedMessage);
+      }
+    } else {
+      io.to(messageData.room).emit("receive_message", savedMessage);
+    }
   });
+  
 
   // 🔸 Handle Message Editing
   socket.on("edit_message", async ({ messageId, newText }) => {
